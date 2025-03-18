@@ -47,11 +47,11 @@ async def start(client, message):
     chat_id = message.chat.id
     buttons = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("ᴍᴀɪɴ ʜᴜʙ", url="https://t.me/GenAnimeOfc"),
-            InlineKeyboardButton("ꜱᴜᴩᴩᴏʀᴛ ᴄʜᴀɴɴᴇʟ", url="https://t.me/+z05NzRmuqjBkYTdl"),
+            InlineKeyboardButton("ᴍᴀɪɴ ʜᴜʙ", url="https://telegram.dog/piras_official"),
+            InlineKeyboardButton("Anime Channel", url="https://telegram.dog/animes_piras"),
         ],
         [
-            InlineKeyboardButton("ᴅᴇᴠᴇʟᴏᴩᴇʀ", url="https://t.me/darkxside78"),
+            InlineKeyboardButton("Dev", url="https://t.me/piras_official"),
         ],
     ])
 
