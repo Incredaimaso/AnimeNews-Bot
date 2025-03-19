@@ -47,4 +47,4 @@ async def fetch_and_send_news(app: Client, db, global_settings_collection, urls)
 async def news_feed_loop(app: Client, db, global_settings_collection, urls):
     while True:
         await fetch_and_send_news(app, db, global_settings_collection, urls)
-        await asyncio.sleep(10)  # Increased delay for better interval control
+        await asyncio.sleep(30)  # Increased delay for better interval control
