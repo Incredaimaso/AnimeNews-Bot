@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def root_route_handler():
-    return jsonify("Chud Gaye Guru")
+    return jsonify("DARKXSIDE78 - The darkness shall follow my command")
 
 @app.route("/health")
 def health_check():
