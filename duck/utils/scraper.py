@@ -1,34 +1,36 @@
-# duck/utils/scraper.py
 import trafilatura
 from curl_cffi import requests
 import logging
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse, urljoin
 
 logger = logging.getLogger(__name__)
 
 class NewsScraper:
     def scrape(self, url):
         """
-        Visits the URL using 'curl_cffi' to bypass Cloudflare.
+        Visits the URL using 'curl_cffi' to bypass Cloudflare and extracts content.
+        Handles relative image URLs and blocks video players.
         """
         domain = urlparse(url).netloc
         path = urlparse(url).path
 
-        # 🛑 REFINED BLOCKLIST: Only block Video Players, allow News
-        # Crunchyroll videos have '/watch/', News has '/news/'
+        # 🛑 BLACKLIST LOGIC
+        # Block Crunchyroll Video Pages (/watch/) but ALLOW News (/news/)
         if "crunchyroll.com" in domain and "/watch/" in path:
             logger.warning(f"⚠️ Skipping Video Page: {url}")
             return None
 
         try:
-            # impersonate="chrome" mimics a real browser
+            # 1. FETCH
+            # impersonate="chrome" makes the request look exactly like a real browser
             response = requests.get(url, impersonate="chrome", timeout=15)
             
             if response.status_code != 200:
                 logger.error(f"❌ Failed to fetch {url} - Status: {response.status_code}")
                 return None
             
-            # Extract content
+            # 2. EXTRACT
+            # We pass the URL parameter so trafilatura can fix some relative links automatically
             result = trafilatura.extract(
                 response.text, 
                 include_images=True, 
@@ -42,13 +44,21 @@ class NewsScraper:
                 import json
                 data = json.loads(result)
                 
-                # --- FIX: RESOLVE RELATIVE IMAGE URLS ---
+                # 3. FIX IMAGE URLS
                 image_url = data.get("image", None)
+                
+                # If image is relative (e.g. "/assets/img.jpg"), make it absolute
                 if image_url and image_url.startswith("/"):
-                    # Converts '/thumbs/img.jpg' -> 'https://site.com/thumbs/img.jpg'
                     image_url = urljoin(url, image_url)
+                
+                # If no image found in metadata, try to find in body (fallback)
+                if not image_url:
+                    # Trafilatura sometimes puts images in the XML output, 
+                    # but for now, we trust the metadata or the feed's fallback.
+                    pass
 
                 return {
+                    "title": data.get("title", ""),
                     "text": data.get("text", ""), 
                     "image": image_url, 
                     "source": data.get("source-hostname", domain) 
@@ -59,4 +69,5 @@ class NewsScraper:
             logger.error(f"Scraping Failed for {url}: {e}")
             return None
 
+# Export instance
 scraper = NewsScraper()
