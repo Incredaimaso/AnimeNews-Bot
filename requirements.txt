@@ -11,3 +11,5 @@ Pillow
 google-generativeai 
 html-telegraph-poster
 lxml_html_clean
+requests
+curl_cffi
