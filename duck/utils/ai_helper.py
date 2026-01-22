@@ -13,7 +13,7 @@ if GEMINI_API_KEY:
 class AIEditor:
     def __init__(self):
         try:
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-pro')
             self.is_active = True if GEMINI_API_KEY else False
         except Exception as e:
             logger.error(f"Failed to load AI Model: {e}")
