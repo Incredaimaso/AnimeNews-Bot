@@ -8,7 +8,7 @@ dnspython
 async-timeout
 motor
 Pillow 
-google-generativeai 
+google-genai
 html-telegraph-poster
 lxml_html_clean
 requests
