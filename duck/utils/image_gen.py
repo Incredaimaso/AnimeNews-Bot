@@ -2,135 +2,150 @@ import os
 import random
 import aiohttp
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 class ImageGen:
     def __init__(self):
-        # Paths to your assets (User must provide these)
+        # Paths
         self.ASSET_PATH = "duck/assets"
         self.FONTS_PATH = os.path.join(self.ASSET_PATH, "fonts")
         self.OVERLAYS_PATH = os.path.join(self.ASSET_PATH, "overlays")
         
-        # Create directories if they don't exist
+        # Ensure directories exist
         os.makedirs(self.FONTS_PATH, exist_ok=True)
         os.makedirs(self.OVERLAYS_PATH, exist_ok=True)
 
     async def download_image(self, url):
         """Downloads image from URL into memory."""
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.read()
-                    return Image.open(BytesIO(data)).convert("RGBA")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        return Image.open(BytesIO(data)).convert("RGBA")
+        except:
+            return None
         return None
 
+    def get_font(self, size=40):
+        """Helper to load a random custom font or default."""
+        try:
+            fonts = [f for f in os.listdir(self.FONTS_PATH) if f.endswith(".ttf")]
+            if fonts:
+                font_path = os.path.join(self.FONTS_PATH, random.choice(fonts))
+                return ImageFont.truetype(font_path, size)
+        except:
+            pass
+        return ImageFont.load_default()
+
     def apply_random_filter(self, img):
-        """Applies a random color grade/style to the image."""
-        style = random.choice(["cyber", "noir", "warm", "faded", "drama"])
+        """Applies a random color grade."""
+        style = random.choice(["cyber", "noir", "drama", "normal"])
         
         if style == "cyber":
-            # High contrast, slight blue tint
-            img = ImageEnhance.Contrast(img).enhance(1.5)
-            r, g, b, a = img.split()
-            b = ImageEnhance.Brightness(b).enhance(1.3)
-            img = Image.merge("RGBA", (r, g, b, a))
-            
+            img = ImageEnhance.Contrast(img).enhance(1.4)
+            img = ImageEnhance.Brightness(img).enhance(1.1)
         elif style == "noir":
-            # Black and White, high contrast
             img = img.convert("L").convert("RGBA")
-            img = ImageEnhance.Contrast(img).enhance(1.8)
-            
+            img = ImageEnhance.Contrast(img).enhance(1.6)
         elif style == "drama":
-            # Darker, high saturation
-            img = ImageEnhance.Brightness(img).enhance(0.8)
             img = ImageEnhance.Color(img).enhance(1.5)
+            img = ImageEnhance.Contrast(img).enhance(1.2)
             
         return img
 
     def add_overlay(self, img):
-        """Adds a random texture overlay (dust, scratches) if available."""
+        """Adds a random texture overlay."""
         try:
+            # UPDATED: Detects png, jpg, jpeg
             overlays = [f for f in os.listdir(self.OVERLAYS_PATH) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             if not overlays:
                 return img
 
             overlay_name = random.choice(overlays)
             overlay = Image.open(os.path.join(self.OVERLAYS_PATH, overlay_name)).convert("RGBA")
-            
-            # Resize overlay to match image
             overlay = overlay.resize(img.size)
             
-            # Blend overlay (simulate "Screen" or "Overlay" mode by alpha blending)
-            # We use a random alpha to make it subtle
-            overlay.putalpha(random.randint(50, 150))
-            
+            # Subtle blend
+            overlay.putalpha(random.randint(40, 90))
             return Image.alpha_composite(img, overlay)
-        except Exception as e:
-            print(f"Overlay Error: {e}")
+        except:
             return img
 
-    def draw_text(self, img, text):
-        """Draws the Breaking News text."""
-        draw = ImageDraw.Draw(img)
+    def draw_text_and_watermark(self, img, title):
+        """Draws the Main Title AND the Watermark."""
         width, height = img.size
+        draw = ImageDraw.Draw(img)
         
-        # 1. Draw a dark gradient at the bottom for readability
+        # --- 1. THE WATERMARK (Duck's Bot) ---
+        watermark_text = "Duck's Bot"
+        wm_font = self.get_font(size=30)
+        
+        # Calculate size to position it Top-Right
+        # bbox returns (left, top, right, bottom)
+        wm_bbox = draw.textbbox((0, 0), watermark_text, font=wm_font)
+        wm_width = wm_bbox[2] - wm_bbox[0]
+        wm_height = wm_bbox[3] - wm_bbox[1]
+        
+        # Position: Top Right with 20px padding
+        x_pos = width - wm_width - 30
+        y_pos = 30
+        
+        # Draw Black Background Box for Watermark
+        padding = 10
+        draw.rectangle(
+            [x_pos - padding, y_pos - padding, x_pos + wm_width + padding, y_pos + wm_height + padding],
+            fill=(0, 0, 0, 180)  # Semi-transparent black
+        )
+        
+        # Draw Watermark Text
+        draw.text((x_pos, y_pos), watermark_text, font=wm_font, fill=(255, 255, 255, 200)) # White text
+
+        # --- 2. BREAKING NEWS TITLE (Bottom) ---
+        # Dark Gradient at bottom
         gradient = Image.new('RGBA', (width, height), (0,0,0,0))
         g_draw = ImageDraw.Draw(gradient)
-        # Simple semi-transparent black bar
-        g_draw.rectangle([(0, height - 150), (width, height)], fill=(0, 0, 0, 200))
+        g_draw.rectangle([(0, height - 160), (width, height)], fill=(0, 0, 0, 220))
         img = Image.alpha_composite(img, gradient)
-        draw = ImageDraw.Draw(img) # Re-init draw on new composite
-
-        # 2. Load Font (Fallback to default if custom missing)
-        try:
-            fonts = [f for f in os.listdir(self.FONTS_PATH) if f.endswith(".ttf")]
-            if fonts:
-                font_path = os.path.join(self.FONTS_PATH, random.choice(fonts))
-                font = ImageFont.truetype(font_path, 40)
-                tag_font = ImageFont.truetype(font_path, 25)
-            else:
-                raise Exception("No fonts found")
-        except:
-            font = ImageFont.load_default()
-            tag_font = ImageFont.load_default()
-
-        # 3. Draw "BREAKING NEWS" Tag
-        draw.text((20, height - 130), "⚡ BREAKING NEWS", font=tag_font, fill=(255, 215, 0)) # Gold color
-
-        # 4. Draw Title (Truncate if too long)
-        if len(text) > 30:
-            text = text[:30] + "..."
         
-        draw.text((20, height - 90), text, font=font, fill=(255, 255, 255))
+        # Refresh draw object for text on top of gradient
+        draw = ImageDraw.Draw(img) 
+
+        # "BREAKING NEWS" Tag
+        tag_font = self.get_font(size=25)
+        draw.text((30, height - 140), "⚡ BREAKING NEWS", font=tag_font, fill=(255, 215, 0))
+
+        # Main Title
+        title_font = self.get_font(size=45)
+        # Truncate title if too long
+        if len(title) > 40:
+            title = title[:40] + "..."
+            
+        draw.text((30, height - 100), title, font=title_font, fill=(255, 255, 255))
         
         return img
 
     async def create_thumbnail(self, image_url, title):
-        """Main function to call from bot."""
+        """Main function."""
         img = await self.download_image(image_url)
         if not img:
             return None
 
-        # 1. Resize to standard aspect ratio (e.g., 1080x1080 or 1280x720)
+        # Standardize size (HD)
         img = img.resize((1280, 720))
 
-        # 2. Apply Random Style
+        # Apply Filters & Overlay
         img = self.apply_random_filter(img)
-
-        # 3. Apply Random Overlay (Texture)
         img = self.add_overlay(img)
 
-        # 4. Add Text
-        img = self.draw_text(img, title)
+        # Draw Text & Watermark
+        img = self.draw_text_and_watermark(img, title)
 
-        # 5. Save to bytes
+        # Output
         output = BytesIO()
         img.convert("RGB").save(output, format="JPEG", quality=95)
         output.seek(0)
         
         return output
 
-# Export instance
 image_generator = ImageGen()
-
