@@ -1,21 +1,23 @@
+# duck/utils/scraper.py
 import trafilatura
 from curl_cffi import requests
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
 class NewsScraper:
     def scrape(self, url):
         """
-        Visits the URL using 'curl_cffi'. 
-        SKIPS scraping for Crunchyroll (video pages cannot be scraped easily).
+        Visits the URL using 'curl_cffi' to bypass Cloudflare.
         """
         domain = urlparse(url).netloc
+        path = urlparse(url).path
 
-        # 🛑 BLACKLIST: Do not scrape these sites (JS Heavy / Video Players)
-        if "crunchyroll.com" in domain:
-            logger.warning(f"⚠️ Skipping scrape for {domain} (Video Player Detected). Using RSS summary.")
+        # 🛑 REFINED BLOCKLIST: Only block Video Players, allow News
+        # Crunchyroll videos have '/watch/', News has '/news/'
+        if "crunchyroll.com" in domain and "/watch/" in path:
+            logger.warning(f"⚠️ Skipping Video Page: {url}")
             return None
 
         try:
@@ -39,9 +41,16 @@ class NewsScraper:
             if result:
                 import json
                 data = json.loads(result)
+                
+                # --- FIX: RESOLVE RELATIVE IMAGE URLS ---
+                image_url = data.get("image", None)
+                if image_url and image_url.startswith("/"):
+                    # Converts '/thumbs/img.jpg' -> 'https://site.com/thumbs/img.jpg'
+                    image_url = urljoin(url, image_url)
+
                 return {
                     "text": data.get("text", ""), 
-                    "image": data.get("image", None), 
+                    "image": image_url, 
                     "source": data.get("source-hostname", domain) 
                 }
             return None
