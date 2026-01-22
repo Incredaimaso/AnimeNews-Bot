@@ -1,4 +1,3 @@
-# duck/utils/ai_helper.py
 from google import genai
 import logging
 from config import GEMINI_API_KEY
@@ -13,8 +12,8 @@ class AIEditor:
             if GEMINI_API_KEY:
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
-                # Use a stable model name
-                self.model_name = "gemini-1.5-flash" 
+                # FIX: Use the 'latest' alias which is safer
+                self.model_name = "gemini-1.5-flash-latest" 
             else:
                 self.is_active = False
         except Exception as e:
@@ -22,24 +21,39 @@ class AIEditor:
             self.is_active = False
 
     async def generate_hype_caption(self, title, summary, source_name):
+        # Fallback with Styling if AI is off
         if not self.is_active:
             return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
+
+        prompt = f"""
+        Act as a professional Anime News Anchor. Write a short, hype caption (max 50 words).
         
-        prompt = f"Write a short, hype anime news caption for: {title}. Source: {source_name}. No emojis."
+        Input Data:
+        - Title: {title}
+        - Summary: {summary}
+        - Source: {source_name}
+        
+        Rules:
+        1. NO EMOJIS.
+        2. Tone: Serious but exciting.
+        3. Wrap the Anime Name in <bold> tags.
+        4. Wrap impact words (like "BREAKING") in <mono> tags.
+        """
+
         try:
             response = await self.client.aio.models.generate_content(
-                model=self.model_name, 
+                model=self.model_name,
                 contents=prompt
             )
             return self._process_tags(response.text)
         except Exception as e:
             logger.error(f"AI Caption Error: {e}")
-            return title # Fallback
+            # FIX: Fallback MUST still use the custom font style
+            return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
 
     async def format_article_html(self, title, full_text, image_url):
         if not self.is_active:
-            # Fallback HTML
-            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text.replace(chr(10), '<br>')}"
+            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text}"
 
         prompt = f"""
         You are an elite Editor for an Anime News Blog.
@@ -67,7 +81,6 @@ class AIEditor:
             return html
         except Exception as e:
             logger.error(f"AI HTML Failed: {e}")
-            # Fallback HTML with image if AI dies
             return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text}"
 
     def _process_tags(self, text):
