@@ -1,20 +1,22 @@
-# duck/utils/ai_helper.py
-import google.generativeai as genai
+from google import genai
 import logging
 from config import GEMINI_API_KEY
 from duck.utils.text_styler import styler
 
+# Configure Logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 class AIEditor:
     def __init__(self):
         try:
-            self.model = genai.GenerativeModel('gemini-pro')
-            self.is_active = True if GEMINI_API_KEY else False
+            # Initialize the new Client
+            if GEMINI_API_KEY:
+                self.client = genai.Client(api_key=GEMINI_API_KEY)
+                self.is_active = True
+            else:
+                logger.warning("⚠️ No GEMINI_API_KEY found!")
+                self.is_active = False
         except Exception as e:
             logger.error(f"Failed to load AI Model: {e}")
             self.is_active = False
@@ -33,26 +35,26 @@ class AIEditor:
         - Source: {source_name}
         
         Rules:
-        1. NO EMOJIS (I add them later).
+        1. NO EMOJIS.
         2. Tone: Serious but exciting.
         3. Wrap the Anime Name in <bold> tags.
         4. Wrap impact words (like "BREAKING") in <mono> tags.
         """
 
         try:
-            response = await self.model.generate_content_async(prompt)
-            raw_text = self._process_tags(response.text)
-            return raw_text
+            # New Async Call format for google-genai
+            response = await self.client.aio.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            return self._process_tags(response.text)
         except Exception as e:
             logger.error(f"AI Caption Failed: {e}")
-            return title
+            return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
 
     async def format_article_html(self, title, full_text, image_url):
-        """
-        Rewrites the FULL article into beautiful HTML for Telegraph.
-        """
+        """Rewrites the FULL article into beautiful HTML for Telegraph."""
         if not self.is_active:
-            # Fallback: Just return text with simple breaks
             return full_text.replace("\n", "<br>")
 
         prompt = f"""
@@ -66,19 +68,18 @@ class AIEditor:
 
         Rules for HTML:
         1. Start with the Main Image using <img src="{image_url}">.
-        2. Use <h3> for sub-headings to break up topics.
-        3. Use <blockquote> for any quotes or official statements.
-        4. Use <b> for key character names or dates.
-        5. Use <ul><li> for lists if applicable.
-        6. Do NOT use <h1> or <h2> (Telegraph uses Title for that).
-        7. Keep paragraphs short (2-3 sentences max).
-        
-        Output ONLY the HTML string. No markdown code blocks.
+        2. Use <h3> for sub-headings.
+        3. Use <blockquote> for quotes.
+        4. Use <b> for key names.
+        5. Output ONLY the HTML string.
         """
         
         try:
-            response = await self.model.generate_content_async(prompt)
-            # clean up if AI wraps it in ```html ... ```
+            response = await self.client.aio.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            # Cleanup markdown code blocks if AI adds them
             clean_html = response.text.replace("```html", "").replace("```", "")
             return clean_html
         except Exception as e:
@@ -86,7 +87,6 @@ class AIEditor:
             return full_text.replace("\n", "<br>")
 
     def _process_tags(self, text):
-        """Helper to apply fonts."""
         text = self._replace_tag(text, "bold", "bold_sans")
         text = self._replace_tag(text, "mono", "monospace")
         text = self._replace_tag(text, "small", "small_caps")
