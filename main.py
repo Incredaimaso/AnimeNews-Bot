@@ -143,8 +143,8 @@ async def check_feeds():
                 logger.error(f"❌ Feed Error for {url}: {e}")
         
         # Wait 5 minutes before next check
-        logger.info("💤 Sleeping for 5 minutes...")
-        await asyncio.sleep(300)
+        logger.info("💤 Sleeping for 60 seconds...")
+        await asyncio.sleep(60)
 
 async def main():
     await app.start()
