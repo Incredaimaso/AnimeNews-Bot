@@ -6,30 +6,31 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 class NewsScraper:
-    def __init__(self):
-        # No complex headers needed; curl_cffi handles the impersonation
-        pass
-
     def scrape(self, url):
         """
-        Visits the URL using 'curl_cffi' to bypass Cloudflare/403s.
+        Visits the URL using 'curl_cffi'. 
+        SKIPS scraping for Crunchyroll (video pages cannot be scraped easily).
         """
+        domain = urlparse(url).netloc
+
+        # 🛑 BLACKLIST: Do not scrape these sites (JS Heavy / Video Players)
+        if "crunchyroll.com" in domain:
+            logger.warning(f"⚠️ Skipping scrape for {domain} (Video Player Detected). Using RSS summary.")
+            return None
+
         try:
-            # impersonate="chrome" mimics a real browser's TLS signature
+            # impersonate="chrome" mimics a real browser
             response = requests.get(url, impersonate="chrome", timeout=15)
             
-            # Check for 403/404 errors
             if response.status_code != 200:
                 logger.error(f"❌ Failed to fetch {url} - Status: {response.status_code}")
                 return None
             
-            html_content = response.text
-
-            # Extract Data using Trafilatura
+            # Extract content
             result = trafilatura.extract(
-                html_content, 
+                response.text, 
                 include_images=True, 
-                include_links=False,
+                include_links=False, 
                 output_format='json',
                 with_metadata=True,
                 url=url
@@ -38,12 +39,10 @@ class NewsScraper:
             if result:
                 import json
                 data = json.loads(result)
-                
                 return {
-                    "title": data.get("title", ""),
                     "text": data.get("text", ""), 
                     "image": data.get("image", None), 
-                    "source": data.get("source-hostname", urlparse(url).netloc) 
+                    "source": data.get("source-hostname", domain) 
                 }
             return None
             
