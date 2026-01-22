@@ -1,5 +1,6 @@
 from google import genai
 import logging
+import re
 from config import GEMINI_API_KEY
 from duck.utils.text_styler import styler
 
@@ -12,7 +13,6 @@ class AIEditor:
             if GEMINI_API_KEY:
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
-                # FIX: Use the 'latest' alias which is safer
                 self.model_name = "gemini-1.5-flash-latest" 
             else:
                 self.is_active = False
@@ -21,10 +21,14 @@ class AIEditor:
             self.is_active = False
 
     async def generate_hype_caption(self, title, summary, source_name):
-        # Fallback with Styling if AI is off
-        if not self.is_active:
-            return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
+        """Generates the Hype Caption with Custom Fonts."""
+        
+        # 1. FALLBACK (If AI is off or fails)
+        fallback_text = f"{styler.convert(title, 'bold_sans')}\n\n{summary[:200]}..."
 
+        if not self.is_active:
+            return fallback_text
+        
         prompt = f"""
         Act as a professional Anime News Anchor. Write a short, hype caption (max 50 words).
         
@@ -36,8 +40,8 @@ class AIEditor:
         Rules:
         1. NO EMOJIS.
         2. Tone: Serious but exciting.
-        3. Wrap the Anime Name in <bold> tags.
-        4. Wrap impact words (like "BREAKING") in <mono> tags.
+        3. **CRITICAL:** You MUST wrap the Anime Title in <bold> tags.
+        4. **CRITICAL:** You MUST wrap impact words (like "BREAKING") in <mono> tags.
         """
 
         try:
@@ -45,19 +49,36 @@ class AIEditor:
                 model=self.model_name,
                 contents=prompt
             )
-            return self._process_tags(response.text)
+            text = response.text
+            
+            # --- AGGRESSIVE FIX: If AI forgot tags, force bold the title ---
+            if "<bold>" not in text and title in text:
+                text = text.replace(title, f"<bold>{title}</bold>")
+            
+            return self._process_tags(text)
+            
         except Exception as e:
             logger.error(f"AI Caption Error: {e}")
-            # FIX: Fallback MUST still use the custom font style
-            return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
+            return fallback_text
 
     async def format_article_html(self, title, full_text, image_url):
+        """Generates the Telegraph Page HTML."""
+        
+        # 1. FALLBACK HTML (If AI fails)
+        # We manually split paragraphs to prevent "congested" text
+        clean_text = full_text.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        fallback_html = (
+            f"<img src='{image_url}'>"
+            f"<h3>{title}</h3>"
+            f"<p>{clean_text}</p>"
+        )
+
         if not self.is_active:
-            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text}"
+            return fallback_html
 
         prompt = f"""
         You are an elite Editor for an Anime News Blog.
-        Convert the raw text below into a structured HTML article.
+        Convert the raw text below into a structured HTML article for Telegraph.
 
         Data:
         - Title: {title}
@@ -65,11 +86,12 @@ class AIEditor:
         - Raw Text: {full_text}
 
         HTML Rules:
-        1. **MUST** start with the image: <img src="{image_url}">
-        2. Wrap every paragraph in <p> tags.
-        3. Use <h3> for subheadings.
-        4. Use <blockquote> for quotes.
-        5. Return ONLY the HTML string.
+        1. Start with: <img src="{image_url}">
+        2. **CRITICAL:** Split the text into multiple short paragraphs using <p> tags. 
+        3. Do NOT produce one giant block of text.
+        4. Use <h3> for subheadings.
+        5. Use <blockquote> for quotes.
+        6. Return ONLY the valid HTML string.
         """
         
         try:
@@ -78,28 +100,35 @@ class AIEditor:
                 contents=prompt
             )
             html = response.text.replace("```html", "").replace("```", "").strip()
+            
+            # Validation: If result is too short or empty, use fallback
+            if len(html) < 50: 
+                return fallback_html
+                
             return html
         except Exception as e:
             logger.error(f"AI HTML Failed: {e}")
-            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text}"
+            return fallback_html
 
     def _process_tags(self, text):
-        text = self._replace_tag(text, "bold", "bold_sans")
-        text = self._replace_tag(text, "mono", "monospace")
-        text = self._replace_tag(text, "small", "small_caps")
-        return text
+        """Replaces XML tags with Custom Unicode Fonts."""
+        # Helper to safely replace tags using Regex (handles nested tags better)
+        def replace_match(match, font_style):
+            return styler.convert(match.group(1), font_style)
 
-    def _replace_tag(self, text, tag_name, font_style):
-        open_tag = f"<{tag_name}>"
-        close_tag = f"</{tag_name}>"
-        while open_tag in text:
-            start = text.find(open_tag)
-            end = text.find(close_tag)
-            if end == -1: break
-            content_start = start + len(open_tag)
-            word = text[content_start:end]
-            styled_word = styler.convert(word, font_style)
-            text = text[:start] + styled_word + text[end + len(close_tag):]
+        # 1. <bold> -> Bold Sans
+        text = re.sub(r'<bold>(.*?)</bold>', lambda m: replace_match(m, "bold_sans"), text, flags=re.DOTALL)
+        
+        # 2. <mono> -> Monospace
+        text = re.sub(r'<mono>(.*?)</mono>', lambda m: replace_match(m, "monospace"), text, flags=re.DOTALL)
+        
+        # 3. <small> -> Small Caps
+        text = re.sub(r'<small>(.*?)</small>', lambda m: replace_match(m, "small_caps"), text, flags=re.DOTALL)
+        
+        # 4. Clean up any leftover tags just in case
+        text = text.replace("<bold>", "").replace("</bold>", "")
+        text = text.replace("<mono>", "").replace("</mono>", "")
+        
         return text
 
 ai_editor = AIEditor()
