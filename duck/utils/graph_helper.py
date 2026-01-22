@@ -1,24 +1,32 @@
-# utils/telegraph_helper.py
 from html_telegraph_poster import TelegraphPoster
+import logging
 
-class TelegraphEngine:
+logger = logging.getLogger(__name__)
+
+class GraphHelper:
     def __init__(self):
         self.t = TelegraphPoster(use_api=True)
-        self.t.create_api_token('AnimeNewsBot') # One-time creation
+        # Check if we have a token or need to create one
+        # Ideally store this token in config/db after first run to avoid spamming API
+        try:
+            self.t.create_api_token('AnimeNewsBot', 'Mr. Duck')
+        except Exception as e:
+            logger.error(f"Telegraph Init Failed: {e}")
 
-    def create_page(self, title, html_content, author_name="Mr. Duck"):
+    def create_page(self, title, content_html, author_name="Mr. Duck"):
         """
-        Creates a Graph.org page with full content.
-        html_content can contain <img src="..."> and <iframe src="youtube...">
+        Creates a Telegraph page.
+        content_html: Can contain <p>, <img>, <br>, <iframe> (youtube)
         """
         try:
             page = self.t.post(
                 title=title,
                 author=author_name,
-                text=html_content
+                text=content_html
             )
             return page['url']
         except Exception as e:
-            print(f"Telegraph Error: {e}")
+            logger.error(f"Telegraph Posting Failed: {e}")
             return None
-          
+
+graph_maker = GraphHelper()
