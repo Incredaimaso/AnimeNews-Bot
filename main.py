@@ -120,7 +120,7 @@ async def check_feeds():
                             await app.send_photo(CHANNEL_ID, photo_file, caption=final_caption, reply_markup=buttons)
                         else:
                             # Fallback if no image exists at all
-                            await app.send_message(CHANNEL_ID, final_caption, reply_markup=buttons, disable_web_page_preview=False)
+                            app.send_message(CHANNEL_ID, final_caption, reply_markup=buttons) 
                         
                         logger.info(f"🚀 Posted: {title}")
                         
