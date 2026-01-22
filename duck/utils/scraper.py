@@ -7,20 +7,19 @@ logger = logging.getLogger(__name__)
 class NewsScraper:
     def scrape(self, url):
         """
-        Visits the URL and extracts the FULL content and the main image.
-        Returns a dictionary: {'text': ..., 'html': ..., 'image': ...}
+        Visits the URL and extracts content + all images.
         """
         try:
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
                 return None
             
-            # Extract metadata (includes image)
-            # We use extract() to get the main content
+            # Extract main content using trafilatura
+            # We explicitly ask for JSON to parse images easily
             result = trafilatura.extract(
                 downloaded, 
                 include_images=True, 
-                include_links=True,
+                include_links=False,
                 output_format='json',
                 with_metadata=True
             )
@@ -29,17 +28,15 @@ class NewsScraper:
                 import json
                 data = json.loads(result)
                 
-                # Get the HTML content for Telegraph
-                html_content = trafilatura.extract(
-                    downloaded, 
-                    include_images=True, 
-                    output_format='xml' # XML/HTML preserves structure for Telegraph
-                )
+                # Extract 'text' (cleaned body) and 'image' (main thumbnail)
+                # Note: trafilatura puts all image URLs it finds in the text usually, 
+                # but we can also try to find them if they are separate.
                 
                 return {
-                    "text": data.get("text", ""),
-                    "image": data.get("image", None),
-                    "html": html_content
+                    "title": data.get("title", ""),
+                    "text": data.get("text", ""), # The full raw text
+                    "image": data.get("image", None), # Main cover image
+                    "source": data.get("source-hostname", "Unknown Source") # e.g. crunchyroll.com
                 }
             return None
             
@@ -48,4 +45,3 @@ class NewsScraper:
             return None
 
 scraper = NewsScraper()
-
