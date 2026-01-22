@@ -1,3 +1,4 @@
+# duck/utils/ai_helper.py
 from google import genai
 import logging
 from config import GEMINI_API_KEY
@@ -12,6 +13,8 @@ class AIEditor:
             if GEMINI_API_KEY:
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
+                # Use a stable model name
+                self.model_name = "gemini-1.5-flash" 
             else:
                 self.is_active = False
         except Exception as e:
@@ -19,23 +22,24 @@ class AIEditor:
             self.is_active = False
 
     async def generate_hype_caption(self, title, summary, source_name):
-        # (Keep your existing caption logic here, it was fine)
         if not self.is_active:
             return f"{styler.convert(title, 'bold_sans')}\n\n{summary}"
         
         prompt = f"Write a short, hype anime news caption for: {title}. Source: {source_name}. No emojis."
         try:
-            response = await self.client.aio.models.generate_content(model='gemini-1.5-flash', contents=prompt)
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name, 
+                contents=prompt
+            )
             return self._process_tags(response.text)
-        except:
-            return title
+        except Exception as e:
+            logger.error(f"AI Caption Error: {e}")
+            return title # Fallback
 
     async def format_article_html(self, title, full_text, image_url):
-        """
-        Generates a RICH HTML page for Telegraph.
-        """
         if not self.is_active:
-            return f"<img src='{image_url}'><br><br>{full_text.replace(chr(10), '<br>')}"
+            # Fallback HTML
+            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text.replace(chr(10), '<br>')}"
 
         prompt = f"""
         You are an elite Editor for an Anime News Blog.
@@ -51,25 +55,38 @@ class AIEditor:
         2. Wrap every paragraph in <p> tags.
         3. Use <h3> for subheadings.
         4. Use <blockquote> for quotes.
-        5. Use <b> for key names/dates.
-        6. Do NOT use markdown (no ```html). Just return the raw HTML string.
+        5. Return ONLY the HTML string.
         """
         
         try:
             response = await self.client.aio.models.generate_content(
-                model='gemini-1.5-flash',
+                model=self.model_name,
                 contents=prompt
             )
-            # Clean formatting
             html = response.text.replace("```html", "").replace("```", "").strip()
             return html
         except Exception as e:
             logger.error(f"AI HTML Failed: {e}")
-            # Fallback HTML with image
-            return f"<img src='{image_url}'><br><br><p>{full_text}</p>"
+            # Fallback HTML with image if AI dies
+            return f"<img src='{image_url}'><br><h3>{title}</h3><br>{full_text}"
 
     def _process_tags(self, text):
-        # (Keep your existing tag helper)
+        text = self._replace_tag(text, "bold", "bold_sans")
+        text = self._replace_tag(text, "mono", "monospace")
+        text = self._replace_tag(text, "small", "small_caps")
+        return text
+
+    def _replace_tag(self, text, tag_name, font_style):
+        open_tag = f"<{tag_name}>"
+        close_tag = f"</{tag_name}>"
+        while open_tag in text:
+            start = text.find(open_tag)
+            end = text.find(close_tag)
+            if end == -1: break
+            content_start = start + len(open_tag)
+            word = text[content_start:end]
+            styled_word = styler.convert(word, font_style)
+            text = text[:start] + styled_word + text[end + len(close_tag):]
         return text
 
 ai_editor = AIEditor()
