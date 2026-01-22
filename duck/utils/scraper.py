@@ -2,37 +2,31 @@ import trafilatura
 from curl_cffi import requests
 import logging
 from urllib.parse import urlparse, urljoin
+import re
 
 logger = logging.getLogger(__name__)
 
 class NewsScraper:
     def scrape(self, url):
-        """
-        Visits the URL using 'curl_cffi' to bypass Cloudflare and extracts content.
-        Handles relative image URLs and blocks video players.
-        """
         domain = urlparse(url).netloc
         path = urlparse(url).path
 
-        # 🛑 BLACKLIST LOGIC
-        # Block Crunchyroll Video Pages (/watch/) but ALLOW News (/news/)
+        # Block Video Pages
         if "crunchyroll.com" in domain and "/watch/" in path:
-            logger.warning(f"⚠️ Skipping Video Page: {url}")
             return None
 
         try:
-            # 1. FETCH
-            # impersonate="chrome" makes the request look exactly like a real browser
+            # 1. Fetch with Chrome Impersonation
             response = requests.get(url, impersonate="chrome", timeout=15)
-            
             if response.status_code != 200:
                 logger.error(f"❌ Failed to fetch {url} - Status: {response.status_code}")
                 return None
             
-            # 2. EXTRACT
-            # We pass the URL parameter so trafilatura can fix some relative links automatically
+            html = response.text
+
+            # 2. Try Trafilatura Extraction first
             result = trafilatura.extract(
-                response.text, 
+                html, 
                 include_images=True, 
                 include_links=False, 
                 output_format='json',
@@ -40,34 +34,46 @@ class NewsScraper:
                 url=url
             )
             
+            data = {}
             if result:
                 import json
                 data = json.loads(result)
+
+            # 3. MANUAL FALLBACK (If trafilatura failed to get text)
+            # This fixes the "discarding data" error for Crunchyroll
+            if not data.get("text"):
+                logger.warning(f"⚠️ Trafilatura failed for {url}. Attempting manual meta extraction.")
                 
-                # 3. FIX IMAGE URLS
+                # Extract Description from <meta name="description">
+                desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
+                og_desc_match = re.search(r'<meta property="og:description" content="(.*?)"', html, re.IGNORECASE)
+                
+                found_text = desc_match.group(1) if desc_match else (og_desc_match.group(1) if og_desc_match else "")
+                
+                if found_text:
+                    data["text"] = found_text
+                    data["title"] = "Anime News" # Will be overwritten by RSS title usually
+                    # Extract Image from <meta property="og:image">
+                    img_match = re.search(r'<meta property="og:image" content="(.*?)"', html, re.IGNORECASE)
+                    if img_match:
+                        data["image"] = img_match.group(1)
+
+            # 4. Final Data Cleanup
+            if data.get("text"):
                 image_url = data.get("image", None)
-                
-                # If image is relative (e.g. "/assets/img.jpg"), make it absolute
                 if image_url and image_url.startswith("/"):
                     image_url = urljoin(url, image_url)
-                
-                # If no image found in metadata, try to find in body (fallback)
-                if not image_url:
-                    # Trafilatura sometimes puts images in the XML output, 
-                    # but for now, we trust the metadata or the feed's fallback.
-                    pass
 
                 return {
-                    "title": data.get("title", ""),
-                    "text": data.get("text", ""), 
-                    "image": image_url, 
-                    "source": data.get("source-hostname", domain) 
+                    "text": data.get("text"),
+                    "image": image_url,
+                    "source": data.get("source-hostname", domain)
                 }
+            
             return None
             
         except Exception as e:
             logger.error(f"Scraping Failed for {url}: {e}")
             return None
 
-# Export instance
 scraper = NewsScraper()
