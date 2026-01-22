@@ -1,13 +1,15 @@
 # config.py
+API_ID = 123456
+API_HASH = "your_api_hash"
+BOT_TOKEN = "your_bot_token"
+MONGO_URI = "your_mongodb_uri"
+GEMINI_API_KEY = "your_gemini_key"
+CHANNEL_ID = -1001234567890  # The channel where news will be posted
+OWNER_ID = 123456789         # Your Telegram ID
 
-API_ID = "" #API ID get it from telegram.org
-API_HASH = "" #API HASH get it from telegram.org
-BOT_TOKEN = "" #Bot Token get it from @BotFather
+# List of RSS Feeds to scrape
 NEWS_FEED_URLS = [
-    "https://example.com/rss_feed_1",
-    "https://example.com/rss_feed_2"
+    "https://www.animenewsnetwork.com/news/rss.xml",
+    "https://crunchyroll.com/newsrss?lang=en",
+    "https://screenrant.com/feed/category/anime/"
 ]
-
-START_PIC = "" #Startup Pic
-MONGO_URI = "" #Databse uri get it from https://www.mongodb.com/
-STICKER_ID = "" # Replace with your sticker's file ID
