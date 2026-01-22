@@ -50,7 +50,7 @@ class ImageGen:
     def add_overlay(self, img):
         """Adds a random texture overlay (dust, scratches) if available."""
         try:
-            overlays = [f for f in os.listdir(self.OVERLAYS_PATH) if f.endswith(".png")]
+            overlays = [f for f in os.listdir(self.OVERLAYS_PATH) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             if not overlays:
                 return img
 
