@@ -11,15 +11,14 @@ class NewsScraper:
         domain = urlparse(url).netloc
         path = urlparse(url).path
 
-        # Block Video Pages
+        # 🛑 Block Video Players
         if "crunchyroll.com" in domain and "/watch/" in path:
             return None
 
         try:
-            # 1. Fetch
+            # 1. Fetch with Chrome Impersonation
             response = requests.get(url, impersonate="chrome", timeout=15)
             if response.status_code != 200:
-                logger.error(f"❌ Failed to fetch {url} - Status: {response.status_code}")
                 return None
             
             html = response.text
@@ -39,11 +38,11 @@ class NewsScraper:
                 import json
                 data = json.loads(result)
 
-            # 3. CRUNCHYROLL FIX: If text is missing/discarded, grab Meta Description
+            # 3. MANUAL FALLBACK (If text is empty)
             if not data.get("text") or len(data.get("text", "")) < 50:
-                logger.warning(f"⚠️ Trafilatura returned empty text. Using Meta Fallback.")
+                # logger.warning(f"⚠️ Trafilatura empty. Using Meta Fallback.")
                 
-                # Regex to find <meta name="description" content="...">
+                # Grab Meta Description
                 desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
                 og_desc_match = re.search(r'<meta property="og:description" content="(.*?)"', html, re.IGNORECASE)
                 
@@ -52,13 +51,13 @@ class NewsScraper:
                 if found_text:
                     data["text"] = found_text
                     
-                # Regex to find <meta property="og:image" content="...">
+                # Grab Meta Image
                 if not data.get("image"):
                     img_match = re.search(r'<meta property="og:image" content="(.*?)"', html, re.IGNORECASE)
                     if img_match:
                         data["image"] = img_match.group(1)
 
-            # 4. Final Data Validation
+            # 4. Final Cleanup
             if data.get("text"):
                 image_url = data.get("image", None)
                 if image_url and image_url.startswith("/"):
