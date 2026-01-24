@@ -12,10 +12,13 @@ class AIEditor:
     def __init__(self):
         try:
             if GEMINI_API_KEY:
+                # Initialize Client
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
-                # Primary Model
-                self.model_name = "gemini-1.5-flash-latest"
+                
+                # USE 'gemini-1.5-flash' (No 'latest', no 'pro', just the base name)
+                # This is the most stable identifier currently.
+                self.model_name = "gemini-1.5-flash"
             else:
                 self.is_active = False
         except Exception as e:
@@ -23,7 +26,7 @@ class AIEditor:
             self.is_active = False
 
     async def _generate(self, prompt):
-        """Helper to try primary model, then fallback to gemini-pro."""
+        """Helper to generate content with fallback."""
         try:
             response = await self.client.aio.models.generate_content(
                 model=self.model_name,
@@ -31,11 +34,11 @@ class AIEditor:
             )
             return response.text
         except Exception as e:
-            logger.warning(f"⚠️ Primary Model Failed ({e}). Retrying with gemini-pro...")
+            logger.warning(f"⚠️ Primary Model Failed ({e}). Trying fallback 'gemini-2.0-flash-exp'...")
             try:
-                # Fallback to the most stable model
+                # If 1.5 fails, try 2.0 (newer, might work if your key is new)
                 response = await self.client.aio.models.generate_content(
-                    model='gemini-pro',
+                    model='gemini-2.0-flash-exp',
                     contents=prompt
                 )
                 return response.text
