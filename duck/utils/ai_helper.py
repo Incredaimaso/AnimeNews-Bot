@@ -14,31 +14,31 @@ class AIEditor:
             if GEMINI_API_KEY:
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
-                # List of models to try in order of preference
+                # NEW PRIORITY ORDER:
+                # 1. Flash (High Rate Limits, Stable)
+                # 2. Flash-8b (Fastest, High Limits)
+                # 3. 2.0-Exp (Smartest, but LOW Limits - Use as backup)
                 self.model_queue = [
-                    "gemini-2.0-flash-exp",   # Newest, usually works
-                    "gemini-1.5-flash",       # Standard Stable
-                    "gemini-1.5-flash-8b",    # High speed
-                    "gemini-1.5-pro"          # Heavy duty backup
+                    "gemini-1.5-flash", 
+                    "gemini-1.5-flash-8b",
+                    "gemini-2.0-flash-exp"
                 ]
-                self.current_model = self.model_queue[0]
             else:
                 self.is_active = False
         except Exception as e:
             logger.error(f"Failed to load AI Client: {e}")
             self.is_active = False
 
-    async def _generate(self, prompt, retries=3):
+    async def _generate(self, prompt):
         """
-        Smart Generator:
-        1. Handles 429 (Rate Limit) by sleeping.
-        2. Handles 404 (Model Not Found) by switching to the next model in the list.
+        Tries every model in the queue. 
+        If one fails (404 or 429), it immediately moves to the next.
         """
-        for attempt in range(retries):
+        for model_name in self.model_queue:
             try:
-                # Try to generate with current model
+                # logger.info(f"🤖 Trying AI Model: {model_name}...")
                 response = await self.client.aio.models.generate_content(
-                    model=self.current_model,
+                    model=model_name,
                     contents=prompt
                 )
                 return response.text
@@ -46,33 +46,20 @@ class AIEditor:
             except Exception as e:
                 error_str = str(e)
                 
-                # CASE 1: Rate Limit (429) -> WAIT
+                # Check for common errors
                 if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    wait_time = 30  # Wait 30 seconds for quota reset
-                    logger.warning(f"⚠️ Quota Exceeded ({self.current_model}). Sleeping {wait_time}s...")
-                    await asyncio.sleep(wait_time)
-                    continue # Retry same model
+                    logger.warning(f"⚠️ Quota Limit on {model_name}. Switching...")
+                    continue # Skip to next model immediately
                 
-                # CASE 2: Model Not Found (404) -> SWITCH MODEL
                 elif "404" in error_str or "NOT_FOUND" in error_str:
-                    logger.warning(f"⚠️ Model '{self.current_model}' missing (404). Switching...")
-                    
-                    # Find current index and move to next
-                    try:
-                        current_idx = self.model_queue.index(self.current_model)
-                        if current_idx + 1 < len(self.model_queue):
-                            self.current_model = self.model_queue[current_idx + 1]
-                            logger.info(f"🔄 Switched to: {self.current_model}")
-                            continue # Retry with new model
-                        else:
-                            logger.error("❌ All models exhausted.")
-                            return None
-                    except ValueError:
-                        self.current_model = self.model_queue[0] # Reset if confused
-                        
+                    logger.warning(f"⚠️ Model {model_name} not found. Switching...")
+                    continue # Skip to next model
+                
                 else:
-                    logger.error(f"❌ AI Error ({self.current_model}): {e}")
-                    return None
+                    logger.error(f"❌ Error on {model_name}: {e}")
+                    continue # Try next model anyway
+
+        logger.error("❌ All AI Models failed.")
         return None
 
     async def generate_hype_caption(self, title, summary, source_name):
