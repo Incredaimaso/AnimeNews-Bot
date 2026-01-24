@@ -115,24 +115,28 @@ async def check_feeds():
                     ])
 
                     # 8. Send & SAVE (Critical Step)
+# ... inside check_feeds() loop ...
+
+                    # ... (Send & Save Logic) ...
                     try:
                         if photo_file:
                             await app.send_photo(CHANNEL_ID, photo_file, caption=final_caption, reply_markup=buttons)
                         else:
-                            # Fallback if no image exists at all
-                            app.send_message(CHANNEL_ID, final_caption, reply_markup=buttons) 
+                            await app.send_message(CHANNEL_ID, final_caption, reply_markup=buttons)
                         
                         logger.info(f"🚀 Posted: {title}")
-                        
+                        await db.add_post(link, title)
+
+                        # --- CRITICAL FIX: SLOW DOWN ---
+                        logger.info("⏳ Cooling down for 15 seconds to respect AI Limits...")
+                        await asyncio.sleep(15) 
+                        # -------------------------------
+
                     except Exception as e:
                         logger.error(f"Telegram Send Error: {e}")
-                    
-                    # ALWAYS save to DB to prevent loops, even if sending failed partly
-                    await db.add_post(link, title)
-                    await asyncio.sleep(5)
 
             except Exception as e:
-                logger.error(f"Feed Loop Error for {url}: {e}")
+                logger.error(f"Feed Loop Error: {e}")
         
         logger.info("💤 Sleeping for 60 seconds...")
         await asyncio.sleep(60)
