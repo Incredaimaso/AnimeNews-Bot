@@ -16,7 +16,7 @@ class NewsScraper:
             return None
 
         try:
-            # 1. Fetch with Chrome Impersonation
+            # 1. Fetch
             response = requests.get(url, impersonate="chrome", timeout=15)
             if response.status_code != 200:
                 logger.error(f"❌ Failed to fetch {url} - Status: {response.status_code}")
@@ -24,7 +24,7 @@ class NewsScraper:
             
             html = response.text
 
-            # 2. Try Trafilatura Extraction first
+            # 2. Extract using Trafilatura
             result = trafilatura.extract(
                 html, 
                 include_images=True, 
@@ -39,12 +39,11 @@ class NewsScraper:
                 import json
                 data = json.loads(result)
 
-            # 3. MANUAL FALLBACK (If trafilatura failed to get text)
-            # This fixes the "discarding data" error for Crunchyroll
-            if not data.get("text"):
-                logger.warning(f"⚠️ Trafilatura failed for {url}. Attempting manual meta extraction.")
+            # 3. CRUNCHYROLL FIX: If text is missing/discarded, grab Meta Description
+            if not data.get("text") or len(data.get("text", "")) < 50:
+                logger.warning(f"⚠️ Trafilatura returned empty text. Using Meta Fallback.")
                 
-                # Extract Description from <meta name="description">
+                # Regex to find <meta name="description" content="...">
                 desc_match = re.search(r'<meta name="description" content="(.*?)"', html, re.IGNORECASE)
                 og_desc_match = re.search(r'<meta property="og:description" content="(.*?)"', html, re.IGNORECASE)
                 
@@ -52,13 +51,14 @@ class NewsScraper:
                 
                 if found_text:
                     data["text"] = found_text
-                    data["title"] = "Anime News" # Will be overwritten by RSS title usually
-                    # Extract Image from <meta property="og:image">
+                    
+                # Regex to find <meta property="og:image" content="...">
+                if not data.get("image"):
                     img_match = re.search(r'<meta property="og:image" content="(.*?)"', html, re.IGNORECASE)
                     if img_match:
                         data["image"] = img_match.group(1)
 
-            # 4. Final Data Cleanup
+            # 4. Final Data Validation
             if data.get("text"):
                 image_url = data.get("image", None)
                 if image_url and image_url.startswith("/"):
