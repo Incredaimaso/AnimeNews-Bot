@@ -14,10 +14,11 @@ class AIEditor:
             if GEMINI_API_KEY:
                 self.client = genai.Client(api_key=GEMINI_API_KEY)
                 self.is_active = True
-                # NEW PRIORITY ORDER:
-                # 1. Flash (High Rate Limits, Stable)
-                # 2. Flash-8b (Fastest, High Limits)
-                # 3. 2.0-Exp (Smartest, but LOW Limits - Use as backup)
+                
+                # 🧠 THE FAIL-FAST QUEUE
+                # 1. 1.5-Flash: Best balance of speed & limits.
+                # 2. 1.5-Flash-8b: Extremely fast, high limits.
+                # 3. 2.0-Flash-Exp: Smartest, but strict low limits.
                 self.model_queue = [
                     "gemini-1.5-flash", 
                     "gemini-1.5-flash-8b",
@@ -31,12 +32,11 @@ class AIEditor:
 
     async def _generate(self, prompt):
         """
-        Tries every model in the queue. 
-        If one fails (404 or 429), it immediately moves to the next.
+        Tries models in order. Switches immediately on error.
         """
         for model_name in self.model_queue:
             try:
-                # logger.info(f"🤖 Trying AI Model: {model_name}...")
+                # logger.info(f"🤖 Generating with: {model_name}...")
                 response = await self.client.aio.models.generate_content(
                     model=model_name,
                     contents=prompt
@@ -46,18 +46,19 @@ class AIEditor:
             except Exception as e:
                 error_str = str(e)
                 
-                # Check for common errors
+                # 429 = Rate Limit -> Switch Model
                 if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    logger.warning(f"⚠️ Quota Limit on {model_name}. Switching...")
-                    continue # Skip to next model immediately
+                    logger.warning(f"⚠️ Limit hit on {model_name}. Switching...")
+                    continue 
                 
+                # 404 = Not Found -> Switch Model
                 elif "404" in error_str or "NOT_FOUND" in error_str:
-                    logger.warning(f"⚠️ Model {model_name} not found. Switching...")
-                    continue # Skip to next model
+                    # logger.warning(f"⚠️ {model_name} unavailable. Switching...")
+                    continue
                 
                 else:
                     logger.error(f"❌ Error on {model_name}: {e}")
-                    continue # Try next model anyway
+                    continue
 
         logger.error("❌ All AI Models failed.")
         return None
@@ -85,7 +86,7 @@ class AIEditor:
         text = await self._generate(prompt)
         
         if text:
-            # Fix missing tags logic
+            # Fix missing tags if AI forgets them
             if "<bold>" not in text and title in text:
                 text = text.replace(title, f"<bold>{title}</bold>")
             return self._process_tags(text)
@@ -93,7 +94,7 @@ class AIEditor:
         return fallback
 
     async def format_article_html(self, title, full_text, image_url):
-        # Fallback HTML
+        # Fallback HTML (Clean)
         clean_text = full_text.replace("\n", "<br>")
         fallback_html = (
             f"<img src='{image_url}'><br>"
