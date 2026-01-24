@@ -12,71 +12,84 @@ class AIEditor:
     def __init__(self):
         try:
             if HF_TOKEN:
-                # We use Zephyr-7B-Beta because it follows instructions perfectly
-                self.repo_id = "HuggingFaceH4/zephyr-7b-beta"
-                self.client = InferenceClient(model=self.repo_id, token=HF_TOKEN)
+                # 1. Use the model you requested
+                # Note: If this specific ID gives trouble, fallback to "THUDM/glm-4-9b-chat"
+                self.repo_id = "zai-org/GLM-4.7-Flash" 
+                self.client = InferenceClient(token=HF_TOKEN)
                 self.is_active = True
             else:
-                logger.warning("⚠️ No HF_TOKEN found in config!")
+                logger.warning("⚠️ No HF_TOKEN found! AI features disabled.")
                 self.is_active = False
         except Exception as e:
             logger.error(f"Failed to init Hugging Face Client: {e}")
             self.is_active = False
 
-    async def _generate(self, prompt):
+    async def _generate(self, system_instruction, user_prompt):
         """
-        Sends prompt to Hugging Face Inference API.
+        Uses Hugging Face 'chat_completion' API.
+        This fixes the 'task not supported' error.
         """
         if not self.is_active: return None
 
-        # Retry loop for stability
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        # Retry loop for model loading / timeouts
         for attempt in range(3):
             try:
-                # We use the text-generation task
-                # Zephyr expects a specific chat format: <|user|>\n...\n<|assistant|>
-                formatted_prompt = f"<|user|>\n{prompt}</s>\n<|assistant|>\n"
-
-                response = self.client.text_generation(
-                    formatted_prompt,
-                    max_new_tokens=1024,
-                    temperature=0.7,
-                    return_full_text=False
+                # We use chat_completion which works for "Conversational" models
+                response = self.client.chat_completion(
+                    messages,
+                    model=self.repo_id,
+                    max_tokens=1500,
+                    temperature=0.7
                 )
-                return response.strip()
+                
+                # Extract the message content
+                return response.choices[0].message.content.strip()
 
             except Exception as e:
-                if "rate limit" in str(e).lower() or "loading" in str(e).lower():
-                    logger.warning(f"⚠️ HF Busy/Loading (Attempt {attempt+1}). Sleeping 10s...")
+                error_str = str(e).lower()
+                if "loading" in error_str or "rate limit" in error_str:
+                    logger.warning(f"⚠️ GLM-4 Loading/Busy (Attempt {attempt+1}). Sleeping 10s...")
                     await asyncio.sleep(10)
+                elif "not supported for task" in error_str:
+                    logger.error(f"❌ Model Task Error: {e}")
+                    return None
                 else:
                     logger.error(f"❌ HF Error: {e}")
                     return None
         return None
 
     async def generate_hype_caption(self, title, summary, source_name):
-        # Fallback
+        # Fallback text
         fallback = f"{styler.convert(title, 'bold_sans')}\n\n{summary[:250]}..."
         
-        prompt = f"""
-        You are an Anime News Anchor. Write a short, hype caption (max 50 words).
+        system_prompt = (
+            "You are a professional Anime News Anchor. "
+            "Your style is: High Energy, Serious, Concise. "
+            "Do NOT use Emojis."
+        )
+
+        user_prompt = f"""
+        Write a short, hype caption (max 50 words) for this news.
         
         Rules:
-        1. NO EMOJIS.
-        2. Tone: Exciting, Cool.
-        3. Wrap the Anime Title in <bold> tags.
-        4. Wrap impact words (like "BREAKING", "CONFIRMED") in <mono> tags.
+        1. Wrap the Anime Title in <bold> tags.
+        2. Wrap impact words (like "BREAKING") in <mono> tags.
+        3. NO Markdown bold (**), use the tags provided.
         
-        News: {title}
+        News Title: {title}
         Source: {source_name}
         Context: {summary}
         """
 
-        text = await self._generate(prompt)
+        text = await self._generate(system_prompt, user_prompt)
         
         if text:
-            # Cleanup if the model hallucinates extra tags
-            text = text.replace("</s>", "").strip()
-            # Fix missing title bolding
+            # Fix bolding if the model forgot
             if "<bold>" not in text and title in text:
                 text = text.replace(title, f"<bold>{title}</bold>")
             return self._process_tags(text)
@@ -88,28 +101,33 @@ class AIEditor:
         clean_text = full_text.replace("\n", "<br>")
         fallback = f"<img src='{image_url}'><br><h3>{title}</h3><br><p>{clean_text}</p>"
 
-        prompt = f"""
-        You are an HTML Editor. Format this anime news into a clean HTML body for a blog.
-        
-        Input Data:
-        Title: {title}
-        Image URL: {image_url}
-        Body Text: {full_text}
+        system_prompt = (
+            "You are an expert HTML Editor for a blog. "
+            "Output ONLY valid HTML code. No markdown formatting (```html)."
+        )
 
-        Instructions:
-        1. Start strictly with: <img src="{image_url}">
-        2. Use <h3> for subheadings.
+        user_prompt = f"""
+        Convert this news text into a clean HTML structure.
+
+        Input Data:
+        - Image: {image_url}
+        - Title: {title}
+        - Body: {full_text}
+
+        Requirements:
+        1. Start exactly with: <img src="{image_url}">
+        2. Follow with: <h3>{title}</h3>
         3. Wrap paragraphs in <p> tags.
-        4. Do NOT use markdown code blocks (```). Just raw HTML.
-        5. Do NOT include <html>, <head>, or <body> tags. Just the content.
+        4. Do NOT include <html>, <head>, or <body> tags.
+        5. Just return the content inside the body.
         """
         
-        text = await self._generate(prompt)
+        text = await self._generate(system_prompt, user_prompt)
         
         if text:
-            # Remove markdown code blocks if the model adds them
-            text = text.replace("```html", "").replace("```", "")
-            return text.strip()
+            # Strip markdown code blocks if present
+            text = text.replace("```html", "").replace("```", "").strip()
+            return text
             
         return fallback
 
@@ -121,6 +139,7 @@ class AIEditor:
         text = re.sub(r'<mono>(.*?)</mono>', lambda m: replace_match(m, "monospace"), text, flags=re.DOTALL)
         text = re.sub(r'<small>(.*?)</small>', lambda m: replace_match(m, "small_caps"), text, flags=re.DOTALL)
         
+        # Cleanup
         return text.replace("<bold>", "").replace("</bold>", "").replace("<mono>", "").replace("</mono>", "")
 
 ai_editor = AIEditor()
