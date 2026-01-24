@@ -1,8 +1,8 @@
-from google import genai
+from huggingface_hub import InferenceClient
 import logging
 import re
 import asyncio
-from config import GEMINI_API_KEY
+from config import HF_TOKEN
 from duck.utils.text_styler import styler
 
 logging.basicConfig(level=logging.INFO)
@@ -11,72 +11,60 @@ logger = logging.getLogger(__name__)
 class AIEditor:
     def __init__(self):
         try:
-            if GEMINI_API_KEY:
-                self.client = genai.Client(api_key=GEMINI_API_KEY)
+            if HF_TOKEN:
+                # We use Zephyr-7B-Beta because it follows instructions perfectly
+                self.repo_id = "HuggingFaceH4/zephyr-7b-beta"
+                self.client = InferenceClient(model=self.repo_id, token=HF_TOKEN)
                 self.is_active = True
-                
-                # 🧠 THE FAIL-FAST QUEUE
-                # 1. 1.5-Flash: Best balance of speed & limits.
-                # 2. 1.5-Flash-8b: Extremely fast, high limits.
-                # 3. 2.0-Flash-Exp: Smartest, but strict low limits.
-                self.model_queue = [
-                    "gemini-1.5-flash", 
-                    "gemini-1.5-flash-8b",
-                    "gemini-2.0-flash-exp"
-                ]
             else:
+                logger.warning("⚠️ No HF_TOKEN found in config!")
                 self.is_active = False
         except Exception as e:
-            logger.error(f"Failed to load AI Client: {e}")
+            logger.error(f"Failed to init Hugging Face Client: {e}")
             self.is_active = False
 
     async def _generate(self, prompt):
         """
-        Tries models in order. Switches immediately on error.
+        Sends prompt to Hugging Face Inference API.
         """
-        for model_name in self.model_queue:
+        if not self.is_active: return None
+
+        # Retry loop for stability
+        for attempt in range(3):
             try:
-                # logger.info(f"🤖 Generating with: {model_name}...")
-                response = await self.client.aio.models.generate_content(
-                    model=model_name,
-                    contents=prompt
+                # We use the text-generation task
+                # Zephyr expects a specific chat format: <|user|>\n...\n<|assistant|>
+                formatted_prompt = f"<|user|>\n{prompt}</s>\n<|assistant|>\n"
+
+                response = self.client.text_generation(
+                    formatted_prompt,
+                    max_new_tokens=1024,
+                    temperature=0.7,
+                    return_full_text=False
                 )
-                return response.text
+                return response.strip()
 
             except Exception as e:
-                error_str = str(e)
-                
-                # 429 = Rate Limit -> Switch Model
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    logger.warning(f"⚠️ Limit hit on {model_name}. Switching...")
-                    continue 
-                
-                # 404 = Not Found -> Switch Model
-                elif "404" in error_str or "NOT_FOUND" in error_str:
-                    # logger.warning(f"⚠️ {model_name} unavailable. Switching...")
-                    continue
-                
+                if "rate limit" in str(e).lower() or "loading" in str(e).lower():
+                    logger.warning(f"⚠️ HF Busy/Loading (Attempt {attempt+1}). Sleeping 10s...")
+                    await asyncio.sleep(10)
                 else:
-                    logger.error(f"❌ Error on {model_name}: {e}")
-                    continue
-
-        logger.error("❌ All AI Models failed.")
+                    logger.error(f"❌ HF Error: {e}")
+                    return None
         return None
 
     async def generate_hype_caption(self, title, summary, source_name):
-        # Fallback (Styled)
+        # Fallback
         fallback = f"{styler.convert(title, 'bold_sans')}\n\n{summary[:250]}..."
-
-        if not self.is_active:
-            return fallback
         
         prompt = f"""
-        Act as a professional Anime News Anchor. Write a short, hype caption (max 50 words).
+        You are an Anime News Anchor. Write a short, hype caption (max 50 words).
+        
         Rules:
         1. NO EMOJIS.
         2. Tone: Exciting, Cool.
         3. Wrap the Anime Title in <bold> tags.
-        4. Wrap impact words (like "BREAKING") in <mono> tags.
+        4. Wrap impact words (like "BREAKING", "CONFIRMED") in <mono> tags.
         
         News: {title}
         Source: {source_name}
@@ -86,7 +74,9 @@ class AIEditor:
         text = await self._generate(prompt)
         
         if text:
-            # Fix missing tags if AI forgets them
+            # Cleanup if the model hallucinates extra tags
+            text = text.replace("</s>", "").strip()
+            # Fix missing title bolding
             if "<bold>" not in text and title in text:
                 text = text.replace(title, f"<bold>{title}</bold>")
             return self._process_tags(text)
@@ -94,38 +84,34 @@ class AIEditor:
         return fallback
 
     async def format_article_html(self, title, full_text, image_url):
-        # Fallback HTML (Clean)
+        # Fallback HTML
         clean_text = full_text.replace("\n", "<br>")
-        fallback_html = (
-            f"<img src='{image_url}'><br>"
-            f"<h3>{title}</h3><br>"
-            f"<p>{clean_text}</p>"
-        )
-
-        if not self.is_active:
-            return fallback_html
+        fallback = f"<img src='{image_url}'><br><h3>{title}</h3><br><p>{clean_text}</p>"
 
         prompt = f"""
-        Format this anime news into HTML for a Telegraph blog post.
+        You are an HTML Editor. Format this anime news into a clean HTML body for a blog.
         
-        Data:
+        Input Data:
         Title: {title}
-        Image: {image_url}
-        Text: {full_text}
+        Image URL: {image_url}
+        Body Text: {full_text}
 
-        Rules:
-        1. Start with <img src="{image_url}">
-        2. Split text into short <p> paragraphs.
-        3. Use <h3> for subheadings.
-        4. Return ONLY valid HTML.
+        Instructions:
+        1. Start strictly with: <img src="{image_url}">
+        2. Use <h3> for subheadings.
+        3. Wrap paragraphs in <p> tags.
+        4. Do NOT use markdown code blocks (```). Just raw HTML.
+        5. Do NOT include <html>, <head>, or <body> tags. Just the content.
         """
         
         text = await self._generate(prompt)
         
         if text:
-            return text.replace("```html", "").replace("```", "").strip()
+            # Remove markdown code blocks if the model adds them
+            text = text.replace("```html", "").replace("```", "")
+            return text.strip()
             
-        return fallback_html
+        return fallback
 
     def _process_tags(self, text):
         def replace_match(match, font_style):
